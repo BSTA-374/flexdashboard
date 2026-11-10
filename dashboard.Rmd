@@ -1,0 +1,110 @@
+---
+title: "Lung cancer in Ohio, 1968--1988"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: cosmo
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(sf)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(DT)
+library(tigris)
+options(tigris_use_cache = TRUE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+# data: one row per county and year
+oh <- read_csv("data/ohio_lung_cancer_1968_1988.csv",
+               col_types = cols(GEOID = "c"))          # GEOID as text
+
+# boundaries
+oh_map <- counties(state = "OH", cb = TRUE, year = 2020,
+                   progress_bar = FALSE) |>
+  st_transform(4326)                             # leaflet wants lon/lat
+
+# for the map: one row per county
+by_county <- oh |>
+  group_by(GEOID) |>
+  summarise(Y = sum(Y), E = sum(E), .groups = "drop") |>
+  mutate(SIR = Y / E)
+
+oh_map <- left_join(oh_map, by_county, by = "GEOID")
+
+# for the time series: one row per year
+focus <- "Cuyahoga"                              # county to follow
+
+by_year <- bind_rows(
+  oh |> group_by(year) |>
+    summarise(Y = sum(Y), E = sum(E), .groups = "drop") |>
+    mutate(area = "Ohio"),
+  oh |> filter(county == focus) |>
+    mutate(area = focus)
+) |>
+  mutate(SIR = Y / E)
+```
+
+Column {data-width=600}
+-----------------------------------------------------------------------
+
+### Standardized incidence ratio (SIR) by county, 1968--1988
+
+```{r map}
+breaks <- c(0, 0.5, 2/3, 0.9, 1/0.9, 1.5, 2, Inf)  # Exercise 4 classes
+pal <- colorBin(rev(RColorBrewer::brewer.pal(7, "RdBu")),
+                domain = oh_map$SIR, bins = breaks)
+
+leaflet(oh_map) |>
+  addProviderTiles("CartoDB.Positron") |>
+  addPolygons(
+    fillColor = ~pal(SIR), fillOpacity = 0.8,
+    color = "white", weight = 1,
+    label = ~sprintf("%s: SIR %.2f (%.0f observed, %.0f expected)",
+                     NAME, SIR, Y, E),
+    highlightOptions = highlightOptions(weight = 2, color = "black",
+                                        bringToFront = TRUE)
+  ) |>
+  addLegend("bottomright", pal = pal, values = ~SIR, title = "SIR",
+            labFormat = labelFormat(digits = 2), opacity = 0.8)
+```
+
+> SIR = observed / expected. Red: more cases than expected; blue: fewer.
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+### SIR by year (dashed line: as many cases as expected)
+
+```{r timeseries}
+cols <- setNames(c("black", "#B2182B"), c("Ohio", focus))
+
+p <- ggplot(by_year, aes(year, SIR, colour = area)) +
+  geom_hline(yintercept = 1, linetype = 2, colour = "grey50") +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.2) +
+  scale_colour_manual(values = cols) +
+  labs(x = NULL, y = "SIR", colour = NULL) +
+  theme_minimal()
+
+ggplotly(p)                                  # hover, zoom
+```
+
+### Counties
+
+```{r table}
+oh_map |>
+  st_drop_geometry() |>
+  transmute(County = NAME, Observed = Y,
+            Expected = round(E, 1), SIR = round(SIR, 2)) |>
+  arrange(desc(SIR)) |>
+  datatable(rownames = FALSE, options = list(pageLength = 10))
+```
+
+> Data: Moraga (2019), Ch. 7. Boundaries: US Census Bureau, via `tigris`.

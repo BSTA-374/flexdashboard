@@ -1,0 +1,86 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Your First Dashboard",
+    "section": "",
+    "text": "Today you build Milestone M1. Reading: Moraga Ch. 12.\n\nM1 — Static dashboard A flexdashboard that loads your data and displays at least one map and one time series, deployed or renderable from your repository.\n\nNothing in M1 is new. You have made leaflet maps since Exercise 4 and ggplot2 charts since the first week. A dashboard only puts them side by side on one screen. We build one together on lung cancer in Ohio, then you swap in your own data.\n\n\n\nM1 asks for\nWhere it is today\n\n\n\n\na flexdashboard\n§2, one file and three symbols\n\n\nloads your data\n§3.1 and §4\n\n\nat least one map\n§3.2\n\n\nat least one time series\n§3.3\n\n\nrenderable from your repository\n§3.6\n\n\ndeployed (optional)\n§3.7\n\n\n\nInstall the three new packages once, in the Console:\n\ninstall.packages(c(\"flexdashboard\", \"plotly\", \"DT\"))"
+  },
+  {
+    "objectID": "index.html#today",
+    "href": "index.html#today",
+    "title": "Your First Dashboard",
+    "section": "",
+    "text": "Today you build Milestone M1. Reading: Moraga Ch. 12.\n\nM1 — Static dashboard A flexdashboard that loads your data and displays at least one map and one time series, deployed or renderable from your repository.\n\nNothing in M1 is new. You have made leaflet maps since Exercise 4 and ggplot2 charts since the first week. A dashboard only puts them side by side on one screen. We build one together on lung cancer in Ohio, then you swap in your own data.\n\n\n\nM1 asks for\nWhere it is today\n\n\n\n\na flexdashboard\n§2, one file and three symbols\n\n\nloads your data\n§3.1 and §4\n\n\nat least one map\n§3.2\n\n\nat least one time series\n§3.3\n\n\nrenderable from your repository\n§3.6\n\n\ndeployed (optional)\n§3.7\n\n\n\nInstall the three new packages once, in the Console:\n\ninstall.packages(c(\"flexdashboard\", \"plotly\", \"DT\"))"
+  },
+  {
+    "objectID": "index.html#load-and-summarise-the-data",
+    "href": "index.html#load-and-summarise-the-data",
+    "title": "Your First Dashboard",
+    "section": "3.1 Load and summarise the data",
+    "text": "3.1 Load and summarise the data\nThis chunk goes at the top of the dashboard, before the first column. It runs once and shows nothing; every panel can use what it creates.\n\nlibrary(sf)\nlibrary(dplyr)\nlibrary(readr)\nlibrary(ggplot2)\nlibrary(plotly)\nlibrary(leaflet)\nlibrary(DT)\nlibrary(tigris)\noptions(tigris_use_cache = TRUE)\n\n# data: one row per county and year\noh &lt;- read_csv(\"data/ohio_lung_cancer_1968_1988.csv\",\n               col_types = cols(GEOID = \"c\"))          # GEOID as text\n\n# boundaries\noh_map &lt;- counties(state = \"OH\", cb = TRUE, year = 2020,\n                   progress_bar = FALSE) |&gt;\n  st_transform(4326)                             # leaflet wants lon/lat\n\n# for the map: one row per county\nby_county &lt;- oh |&gt;\n  group_by(GEOID) |&gt;\n  summarise(Y = sum(Y), E = sum(E), .groups = \"drop\") |&gt;\n  mutate(SIR = Y / E)\n\noh_map &lt;- left_join(oh_map, by_county, by = \"GEOID\")\n\n# for the time series: one row per year\nfocus &lt;- \"Cuyahoga\"                              # county to follow\n\nby_year &lt;- bind_rows(\n  oh |&gt; group_by(year) |&gt;\n    summarise(Y = sum(Y), E = sum(E), .groups = \"drop\") |&gt;\n    mutate(area = \"Ohio\"),\n  oh |&gt; filter(county == focus) |&gt;\n    mutate(area = focus)\n) |&gt;\n  mutate(SIR = Y / E)\n\nThe same data, summarised twice: over the years for the map (by_county, 88 rows), and over the counties for the time series (by_year, one row per year for Ohio and one per year for Cuyahoga County). That is the whole idea of M1.\nCheck the join before going further: the number of counties without data should be zero.\n\nsum(is.na(oh_map$SIR))                                 # should be 0\n\n[1] 0"
+  },
+  {
+    "objectID": "index.html#the-map",
+    "href": "index.html#the-map",
+    "title": "Your First Dashboard",
+    "section": "3.2 The map",
+    "text": "3.2 The map\nThe leaflet map of Exercise 4: the SIR, with the same classes and the same red–blue colours, so that the neutral class sits around 1.\n\nbreaks &lt;- c(0, 0.5, 2/3, 0.9, 1/0.9, 1.5, 2, Inf)  # Exercise 4 classes\npal &lt;- colorBin(rev(RColorBrewer::brewer.pal(7, \"RdBu\")),\n                domain = oh_map$SIR, bins = breaks)\n\nleaflet(oh_map) |&gt;\n  addTiles() |&gt;\n  addPolygons(\n    fillColor = ~pal(SIR), fillOpacity = 0.8,\n    color = \"white\", weight = 1,\n    label = ~sprintf(\"%s: SIR %.2f (%.0f observed, %.0f expected)\",\n                     NAME, SIR, Y, E),\n    highlightOptions = highlightOptions(weight = 2, color = \"black\",\n                                        bringToFront = TRUE)\n  ) |&gt;\n  addLegend(\"bottomright\", pal = pal, values = ~SIR, title = \"SIR\",\n            labFormat = labelFormat(digits = 2), opacity = 0.8)\n\n\n\n\n\nHover over a county: the label gives its observed and expected cases, so the reader can judge whether a dark colour rests on many cases or on a handful."
+  },
+  {
+    "objectID": "index.html#the-time-series",
+    "href": "index.html#the-time-series",
+    "title": "Your First Dashboard",
+    "section": "3.3 The time series",
+    "text": "3.3 The time series\nAn ordinary ggplot: one line for Ohio, one for Cuyahoga County, and a dashed line at 1, as many cases as expected.\n\ncols &lt;- setNames(c(\"black\", \"#B2182B\"), c(\"Ohio\", focus))\n\np &lt;- ggplot(by_year, aes(year, SIR, colour = area)) +\n  geom_hline(yintercept = 1, linetype = 2, colour = \"grey50\") +\n  geom_line(linewidth = 0.8) +\n  geom_point(size = 1.2) +\n  scale_colour_manual(values = cols) +\n  labs(x = NULL, y = \"SIR\", colour = NULL) +\n  theme_minimal()\n\np\n\n\n\n\n\n\n\n\nOne more line makes it interactive: hover for the values, drag to zoom, double-click to reset.\n\nggplotly(p)                                  # hover, zoom\n\n\n\n\n\nOhio’s SIR rose from 0.67 in 1968 to 1.32 in 1988. The expected cases use one set of rates for the whole period, so the map averages over this rise; in M2 the reader will pick the year."
+  },
+  {
+    "objectID": "index.html#the-table-optional",
+    "href": "index.html#the-table-optional",
+    "title": "Your First Dashboard",
+    "section": "3.4 The table (optional)",
+    "text": "3.4 The table (optional)\nNot required for M1, but it costs four lines and gives the exact numbers behind the colours. Click a column header to sort.\n\noh_map |&gt;\n  st_drop_geometry() |&gt;\n  transmute(County = NAME, Observed = Y,\n            Expected = round(E, 1), SIR = round(SIR, 2)) |&gt;\n  arrange(desc(SIR)) |&gt;\n  datatable(rownames = FALSE, options = list(pageLength = 10))"
+  },
+  {
+    "objectID": "index.html#put-it-together",
+    "href": "index.html#put-it-together",
+    "title": "Your First Dashboard",
+    "section": "3.5 Put it together",
+    "text": "3.5 Put it together\nPaste the chunks of §3.1–§3.4 under their ### panels. Two additions to the YAML header: theme: cosmo, the look of our course pages, and source_code: embed, a Source Code button in the corner, so that I can read your code from the dashboard itself. The whole file:\n---\ntitle: \"Lung cancer in Ohio, 1968--1988\"\noutput:\n  flexdashboard::flex_dashboard:\n    orientation: columns\n    vertical_layout: fill\n    theme: cosmo\n    source_code: embed\n---\n\n```{r setup, include=FALSE}\nlibrary(flexdashboard)\nlibrary(sf)\nlibrary(dplyr)\nlibrary(readr)\nlibrary(ggplot2)\nlibrary(plotly)\nlibrary(leaflet)\nlibrary(DT)\nlibrary(tigris)\noptions(tigris_use_cache = TRUE)\nknitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)\n\n# data: one row per county and year\noh &lt;- read_csv(\"data/ohio_lung_cancer_1968_1988.csv\",\n               col_types = cols(GEOID = \"c\"))          # GEOID as text\n\n# boundaries\noh_map &lt;- counties(state = \"OH\", cb = TRUE, year = 2020,\n                   progress_bar = FALSE) |&gt;\n  st_transform(4326)                             # leaflet wants lon/lat\n\n# for the map: one row per county\nby_county &lt;- oh |&gt;\n  group_by(GEOID) |&gt;\n  summarise(Y = sum(Y), E = sum(E), .groups = \"drop\") |&gt;\n  mutate(SIR = Y / E)\n\noh_map &lt;- left_join(oh_map, by_county, by = \"GEOID\")\n\n# for the time series: one row per year\nfocus &lt;- \"Cuyahoga\"                              # county to follow\n\nby_year &lt;- bind_rows(\n  oh |&gt; group_by(year) |&gt;\n    summarise(Y = sum(Y), E = sum(E), .groups = \"drop\") |&gt;\n    mutate(area = \"Ohio\"),\n  oh |&gt; filter(county == focus) |&gt;\n    mutate(area = focus)\n) |&gt;\n  mutate(SIR = Y / E)\n```\n\nColumn {data-width=600}\n-----------------------------------------------------------------------\n\n### Standardized incidence ratio (SIR) by county, 1968--1988\n\n```{r map}\nbreaks &lt;- c(0, 0.5, 2/3, 0.9, 1/0.9, 1.5, 2, Inf)  # Exercise 4 classes\npal &lt;- colorBin(rev(RColorBrewer::brewer.pal(7, \"RdBu\")),\n                domain = oh_map$SIR, bins = breaks)\n\nleaflet(oh_map) |&gt;\n  addProviderTiles(\"CartoDB.Positron\") |&gt;\n  addPolygons(\n    fillColor = ~pal(SIR), fillOpacity = 0.8,\n    color = \"white\", weight = 1,\n    label = ~sprintf(\"%s: SIR %.2f (%.0f observed, %.0f expected)\",\n                     NAME, SIR, Y, E),\n    highlightOptions = highlightOptions(weight = 2, color = \"black\",\n                                        bringToFront = TRUE)\n  ) |&gt;\n  addLegend(\"bottomright\", pal = pal, values = ~SIR, title = \"SIR\",\n            labFormat = labelFormat(digits = 2), opacity = 0.8)\n```\n\n&gt; SIR = observed / expected. Red: more cases than expected; blue: fewer.\n\nColumn {data-width=400}\n-----------------------------------------------------------------------\n\n### SIR by year (dashed line: as many cases as expected)\n\n```{r timeseries}\ncols &lt;- setNames(c(\"black\", \"#B2182B\"), c(\"Ohio\", focus))\n\np &lt;- ggplot(by_year, aes(year, SIR, colour = area)) +\n  geom_hline(yintercept = 1, linetype = 2, colour = \"grey50\") +\n  geom_line(linewidth = 0.8) +\n  geom_point(size = 1.2) +\n  scale_colour_manual(values = cols) +\n  labs(x = NULL, y = \"SIR\", colour = NULL) +\n  theme_minimal()\n\nggplotly(p)                                  # hover, zoom\n```\n\n### Counties\n\n```{r table}\noh_map |&gt;\n  st_drop_geometry() |&gt;\n  transmute(County = NAME, Observed = Y,\n            Expected = round(E, 1), SIR = round(SIR, 2)) |&gt;\n  arrange(desc(SIR)) |&gt;\n  datatable(rownames = FALSE, options = list(pageLength = 10))\n```\n\n&gt; Data: Moraga (2019), Ch. 7. Boundaries: US Census Bureau, via `tigris`."
+  },
+  {
+    "objectID": "index.html#render-it",
+    "href": "index.html#render-it",
+    "title": "Your First Dashboard",
+    "section": "3.6 Render it",
+    "text": "3.6 Render it\nSave the file as dashboard.Rmd at the top of your repository, next to the data/ folder, and click Knit in RStudio (or run rmarkdown::render(\"dashboard.Rmd\") in the Console). You get dashboard.html: one self-contained file that opens in any browser.\n\n\n\n\n\n\nWarningKnit, not quarto render\n\n\n\nQuarto does not know the flexdashboard format. Rendered with Quarto, the file comes out as an ordinary scrolling page, with the panel titles as headings. If your “dashboard” scrolls like a report, this is why.\n\n\nThat is M1: renderable from your repository."
+  },
+  {
+    "objectID": "index.html#put-it-online-optional-for-m1",
+    "href": "index.html#put-it-online-optional-for-m1",
+    "title": "Your First Dashboard",
+    "section": "3.7 Put it online (optional for M1)",
+    "text": "3.7 Put it online (optional for M1)\nYour exercises are a Quarto website published from docs/. Two entries in _quarto.yml add the dashboard to it:\nproject:\n  type: website\n  output-dir: docs\n  render:\n    - \"*.qmd\"          # Quarto renders the .qmd pages only\n  resources:\n    - dashboard.html   # and copies the knitted dashboard into docs/\nThen, each time: Knit dashboard.Rmd, run quarto render, and commit and push with GitHub Desktop. The dashboard is at https://&lt;username&gt;.github.io/&lt;repository&gt;/dashboard.html. Add a link to it from index.qmd:\n[My dashboard](dashboard.html)"
+  },
+  {
+    "objectID": "dashboard.html",
+    "href": "dashboard.html",
+    "title": "Lung cancer in Ohio, 1968–1988",
+    "section": "",
+    "text": "SIR = observed / expected. Red: more cases than expected; blue: fewer."
+  },
+  {
+    "objectID": "dashboard.html#column",
+    "href": "dashboard.html#column",
+    "title": "Lung cancer in Ohio, 1968–1988",
+    "section": "",
+    "text": "SIR = observed / expected. Red: more cases than expected; blue: fewer."
+  },
+  {
+    "objectID": "dashboard.html#column-1",
+    "href": "dashboard.html#column-1",
+    "title": "Lung cancer in Ohio, 1968–1988",
+    "section": "Column",
+    "text": "Column\n\nSIR by year (dashed line: as many cases as expected)\n\n\n\n\n\n\n\n\nCounties\n\n\n\n\n\n\n\nData: Moraga (2019), Ch. 7. Boundaries: US Census Bureau, via tigris."
+  }
+]

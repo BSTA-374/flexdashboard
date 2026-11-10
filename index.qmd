@@ -1,0 +1,526 @@
+---
+title: "Your First Dashboard"
+subtitle: "flexdashboard: one map, one time series, one file"
+author: "Eric M. Delmelle · Lehigh University"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    toc-title: "On this page"
+    number-sections: true
+    code-fold: true
+    code-copy: true
+    code-tools: true
+    highlight-style: github
+    fig-width: 7
+    fig-height: 3.6
+    fig-align: center
+    embed-resources: true
+  pdf:
+    papersize: letter
+    geometry:
+      - margin=1in
+    toc: false
+    colorlinks: true
+    code-overflow: wrap
+execute:
+  warning: false
+  message: false
+---
+
+## Today {.unnumbered}
+
+Today you build **Milestone M1**. Reading: **Moraga Ch. 12**.
+
+> **M1 --- Static dashboard** A `flexdashboard`
+> that loads your data and displays at least one map and one time series,
+> deployed or renderable from your repository.
+
+Nothing in M1 is new. You have made `leaflet` maps since Exercise 4 and
+`ggplot2` charts since the first week. A dashboard only puts them **side by
+side on one screen**. We build one together on lung cancer in Ohio, then you
+swap in your own data.
+
+| M1 asks for | Where it is today |
+|---|---|
+| a `flexdashboard` | §2, one file and three symbols |
+| loads your data | §3.1 and §4 |
+| at least one map | §3.2 |
+| at least one time series | §3.3 |
+| renderable from your repository | §3.6 |
+| deployed (optional) | §3.7 |
+
+Install the three new packages once, in the **Console**:
+
+```{r}
+#| label: install
+#| eval: false
+#| code-fold: false
+
+install.packages(c("flexdashboard", "plotly", "DT"))
+```
+
+# What a dashboard is
+
+A report scrolls: you read it top to bottom, once. A dashboard fits **one
+screen**, and each panel answers one question about the same data. In ours,
+the map answers *where*, the time series *when*, and the table *which county,
+exactly*. The reader looks at all three at once.
+
+# One file, three symbols
+
+A `flexdashboard` is an R Markdown file (`.Rmd`) with one line in its YAML
+header. The layout is written with three symbols:
+
+| You type | You get |
+|---|---|
+| `output: flexdashboard::flex_dashboard` | a dashboard instead of a report |
+| `Column {data-width=600}`, then a line of dashes `-----` | a new column; widths are relative |
+| `### Title` | a panel, with its title |
+| an R chunk under `###` | what the panel shows |
+| `> text` under the chunk | a small note at the bottom of the panel |
+
+This skeleton:
+
+````markdown
+---
+title: "Lung cancer in Ohio, 1968--1988"
+output: flexdashboard::flex_dashboard
+---
+
+`r ''````{r setup, include=FALSE}
+# packages and data: runs once, shows nothing
+```
+
+Column {data-width=600}
+-----------------------------------------------------------------------
+
+### Map
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+### Time series
+
+### Table
+````
+
+gives this screen:
+
+```{=html}
+<div style="max-width:640px;margin:1em auto;font-family:SFMono-Regular,Menlo,Consolas,monospace;font-size:0.85em;">
+  <div style="background:#2780e3;color:#fff;padding:6px 10px;border-radius:6px 6px 0 0;">title: Lung cancer in Ohio, 1968&ndash;1988</div>
+  <div style="display:grid;grid-template-columns:3fr 2fr;grid-template-rows:110px 110px;gap:8px;padding:8px;background:#f2f2f2;border-radius:0 0 6px 6px;">
+    <div style="grid-row:1 / 3;background:#fff;border:1px solid #ccc;border-radius:4px;padding:8px;">### Map<br><span style="color:#888;">Column {data-width=600}</span></div>
+    <div style="background:#fff;border:1px solid #ccc;border-radius:4px;padding:8px;">### Time series<br><span style="color:#888;">Column {data-width=400}</span></div>
+    <div style="background:#fff;border:1px solid #ccc;border-radius:4px;padding:8px;">### Table</div>
+  </div>
+</div>
+```
+
+Two columns; the second holds two panels stacked. This is exactly Moraga's
+PM~2.5~ dashboard (Ch. 12), with a time series in place of the histogram.
+
+::: {.callout-note}
+## Why `.Rmd` and not `.qmd`?
+`flexdashboard` is an R Markdown format, and Moraga Ch. 12--15 build on it.
+For M2 we add Shiny to this same file with one line in the YAML header. So the
+dashboard is the one `.Rmd` file in your repository; everything else stays
+`.qmd`.
+:::
+
+# Worked example: lung cancer in Ohio
+
+The data of Moraga Ch. 7: lung cancer cases in the 88 counties of Ohio, every
+year from 1968 to 1988. One row per county and year:
+
+| Column | Meaning |
+|---|---|
+| `GEOID` | county FIPS code, to join with the boundaries |
+| `county` | county name |
+| `year` | 1968, ..., 1988 |
+| `Y` | observed cases |
+| `E` | expected cases (indirect standardization, by age and sex) |
+| `population` | population at risk |
+
+Save the CSV in your `data/` folder, as in Exercises 4--7.
+
+## Load and summarise the data
+
+This chunk goes at the top of the dashboard, before the first column. It runs
+once and shows nothing; every panel can use what it creates.
+
+```{r}
+#| label: setup
+#| code-fold: false
+
+library(sf)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(DT)
+library(tigris)
+options(tigris_use_cache = TRUE)
+
+# data: one row per county and year
+oh <- read_csv("data/ohio_lung_cancer_1968_1988.csv",
+               col_types = cols(GEOID = "c"))          # GEOID as text
+
+# boundaries
+oh_map <- counties(state = "OH", cb = TRUE, year = 2020,
+                   progress_bar = FALSE) |>
+  st_transform(4326)                             # leaflet wants lon/lat
+
+# for the map: one row per county
+by_county <- oh |>
+  group_by(GEOID) |>
+  summarise(Y = sum(Y), E = sum(E), .groups = "drop") |>
+  mutate(SIR = Y / E)
+
+oh_map <- left_join(oh_map, by_county, by = "GEOID")
+
+# for the time series: one row per year
+focus <- "Cuyahoga"                              # county to follow
+
+by_year <- bind_rows(
+  oh |> group_by(year) |>
+    summarise(Y = sum(Y), E = sum(E), .groups = "drop") |>
+    mutate(area = "Ohio"),
+  oh |> filter(county == focus) |>
+    mutate(area = focus)
+) |>
+  mutate(SIR = Y / E)
+```
+
+The same data, **summarised twice**: over the years for the map
+(`by_county`, `r nrow(by_county)` rows), and over the counties for the time
+series (`by_year`, one row per year for Ohio and one per year for
+`r focus` County). That is the whole idea of M1.
+
+Check the join before going further: the number of counties without data
+should be zero.
+
+```{r}
+#| label: check-join
+#| code-fold: false
+
+sum(is.na(oh_map$SIR))                                 # should be 0
+```
+
+## The map
+
+The leaflet map of Exercise 4: the SIR, with the same classes and the same
+red--blue colours, so that the neutral class sits around 1.
+
+```{r}
+#| label: map
+#| code-fold: false
+
+breaks <- c(0, 0.5, 2/3, 0.9, 1/0.9, 1.5, 2, Inf)  # Exercise 4 classes
+pal <- colorBin(rev(RColorBrewer::brewer.pal(7, "RdBu")),
+                domain = oh_map$SIR, bins = breaks)
+
+leaflet(oh_map) |>
+  addTiles() |>
+  addPolygons(
+    fillColor = ~pal(SIR), fillOpacity = 0.8,
+    color = "white", weight = 1,
+    label = ~sprintf("%s: SIR %.2f (%.0f observed, %.0f expected)",
+                     NAME, SIR, Y, E),
+    highlightOptions = highlightOptions(weight = 2, color = "black",
+                                        bringToFront = TRUE)
+  ) |>
+  addLegend("bottomright", pal = pal, values = ~SIR, title = "SIR",
+            labFormat = labelFormat(digits = 2), opacity = 0.8)
+```
+
+Hover over a county: the label gives its observed and expected cases, so the
+reader can judge whether a dark colour rests on many cases or on a handful.
+
+## The time series
+
+An ordinary `ggplot`: one line for Ohio, one for `r focus` County, and a
+dashed line at 1, as many cases as expected.
+
+```{r}
+#| label: ts-static
+#| code-fold: false
+
+cols <- setNames(c("black", "#B2182B"), c("Ohio", focus))
+
+p <- ggplot(by_year, aes(year, SIR, colour = area)) +
+  geom_hline(yintercept = 1, linetype = 2, colour = "grey50") +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.2) +
+  scale_colour_manual(values = cols) +
+  labs(x = NULL, y = "SIR", colour = NULL) +
+  theme_minimal()
+
+p
+```
+
+One more line makes it interactive: hover for the values, drag to zoom,
+double-click to reset.
+
+```{r}
+#| label: ts-plotly
+#| code-fold: false
+
+ggplotly(p)                                  # hover, zoom
+```
+
+Ohio's SIR rose from `r sprintf("%.2f", by_year$SIR[by_year$area == "Ohio"][1])`
+in 1968 to `r sprintf("%.2f", tail(by_year$SIR[by_year$area == "Ohio"], 1))` in
+1988. The expected cases use one set of rates for the whole period, so the
+map averages over this rise; in M2 the reader will pick the year.
+
+## The table (optional)
+
+Not required for M1, but it costs four lines and gives the exact numbers
+behind the colours. Click a column header to sort.
+
+```{r}
+#| label: table
+#| code-fold: false
+
+oh_map |>
+  st_drop_geometry() |>
+  transmute(County = NAME, Observed = Y,
+            Expected = round(E, 1), SIR = round(SIR, 2)) |>
+  arrange(desc(SIR)) |>
+  datatable(rownames = FALSE, options = list(pageLength = 10))
+```
+
+## Put it together
+
+Paste the chunks of §3.1--§3.4 under their `###` panels. Two additions to the
+YAML header: `theme: cosmo`, the look of our course pages, and
+`source_code: embed`, a **Source Code** button in the corner, so that I can
+read your code from the dashboard itself. The whole file:
+
+````markdown
+---
+title: "Lung cancer in Ohio, 1968--1988"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: cosmo
+    source_code: embed
+---
+
+`r ''````{r setup, include=FALSE}
+library(flexdashboard)
+library(sf)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(DT)
+library(tigris)
+options(tigris_use_cache = TRUE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+# data: one row per county and year
+oh <- read_csv("data/ohio_lung_cancer_1968_1988.csv",
+               col_types = cols(GEOID = "c"))          # GEOID as text
+
+# boundaries
+oh_map <- counties(state = "OH", cb = TRUE, year = 2020,
+                   progress_bar = FALSE) |>
+  st_transform(4326)                             # leaflet wants lon/lat
+
+# for the map: one row per county
+by_county <- oh |>
+  group_by(GEOID) |>
+  summarise(Y = sum(Y), E = sum(E), .groups = "drop") |>
+  mutate(SIR = Y / E)
+
+oh_map <- left_join(oh_map, by_county, by = "GEOID")
+
+# for the time series: one row per year
+focus <- "Cuyahoga"                              # county to follow
+
+by_year <- bind_rows(
+  oh |> group_by(year) |>
+    summarise(Y = sum(Y), E = sum(E), .groups = "drop") |>
+    mutate(area = "Ohio"),
+  oh |> filter(county == focus) |>
+    mutate(area = focus)
+) |>
+  mutate(SIR = Y / E)
+```
+
+Column {data-width=600}
+-----------------------------------------------------------------------
+
+### Standardized incidence ratio (SIR) by county, 1968--1988
+
+`r ''````{r map}
+breaks <- c(0, 0.5, 2/3, 0.9, 1/0.9, 1.5, 2, Inf)  # Exercise 4 classes
+pal <- colorBin(rev(RColorBrewer::brewer.pal(7, "RdBu")),
+                domain = oh_map$SIR, bins = breaks)
+
+leaflet(oh_map) |>
+  addProviderTiles("CartoDB.Positron") |>
+  addPolygons(
+    fillColor = ~pal(SIR), fillOpacity = 0.8,
+    color = "white", weight = 1,
+    label = ~sprintf("%s: SIR %.2f (%.0f observed, %.0f expected)",
+                     NAME, SIR, Y, E),
+    highlightOptions = highlightOptions(weight = 2, color = "black",
+                                        bringToFront = TRUE)
+  ) |>
+  addLegend("bottomright", pal = pal, values = ~SIR, title = "SIR",
+            labFormat = labelFormat(digits = 2), opacity = 0.8)
+```
+
+> SIR = observed / expected. Red: more cases than expected; blue: fewer.
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+### SIR by year (dashed line: as many cases as expected)
+
+`r ''````{r timeseries}
+cols <- setNames(c("black", "#B2182B"), c("Ohio", focus))
+
+p <- ggplot(by_year, aes(year, SIR, colour = area)) +
+  geom_hline(yintercept = 1, linetype = 2, colour = "grey50") +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.2) +
+  scale_colour_manual(values = cols) +
+  labs(x = NULL, y = "SIR", colour = NULL) +
+  theme_minimal()
+
+ggplotly(p)                                  # hover, zoom
+```
+
+### Counties
+
+`r ''````{r table}
+oh_map |>
+  st_drop_geometry() |>
+  transmute(County = NAME, Observed = Y,
+            Expected = round(E, 1), SIR = round(SIR, 2)) |>
+  arrange(desc(SIR)) |>
+  datatable(rownames = FALSE, options = list(pageLength = 10))
+```
+
+> Data: Moraga (2019), Ch. 7. Boundaries: US Census Bureau, via `tigris`.
+````
+
+## Render it
+
+Save the file as **`dashboard.Rmd`** at the top of your repository, next to
+the `data/` folder, and click **Knit** in RStudio (or run
+`rmarkdown::render("dashboard.Rmd")` in the Console). You get
+`dashboard.html`: one self-contained file that opens in any browser.
+
+::: {.callout-warning}
+## Knit, not `quarto render`
+Quarto does not know the `flexdashboard` format. Rendered with Quarto, the
+file comes out as an ordinary scrolling page, with the panel titles as
+headings. If your "dashboard" scrolls like a report, this is why.
+:::
+
+That is M1: **renderable from your repository**.
+
+## Put it online (optional for M1)
+
+Your exercises are a Quarto website published from `docs/`. Two entries in
+`_quarto.yml` add the dashboard to it:
+
+```yaml
+project:
+  type: website
+  output-dir: docs
+  render:
+    - "*.qmd"          # Quarto renders the .qmd pages only
+  resources:
+    - dashboard.html   # and copies the knitted dashboard into docs/
+```
+
+Then, each time: **Knit** `dashboard.Rmd`, run `quarto render`, and commit
+and push with GitHub Desktop. The dashboard is at
+`https://<username>.github.io/<repository>/dashboard.html`. Add a link to it
+from `index.qmd`:
+
+```markdown
+[My dashboard](dashboard.html)
+```
+
+# Your turn: from Ohio to your data
+
+Copy `dashboard.Rmd`, keep the layout, and change only the setup chunk:
+
+| In the example | For your data |
+|---|---|
+| `read_csv("data/ohio_lung_cancer_1968_1988.csv", ...)` | your file, in `data/` |
+| `col_types = cols(GEOID = "c")` | your ID column, as text; pad lost zeros with `sprintf("%05d", ...)` as in Exercise 4 |
+| `counties(state = "OH", ...)` | your state; `tracts()` or `zctas()` for other units |
+| `Y`, `E` | your observed and expected counts |
+| `year` | your time column; months or weeks work as a `Date` |
+| `focus <- "Cuyahoga"` | one area of your data |
+
+::: {.callout-tip}
+## No expected counts?
+Map a rate instead, with a sequential palette, since a rate has no neutral
+value:
+
+```{r}
+#| label: rate
+#| eval: false
+#| code-fold: false
+
+by_county <- mutate(by_county, rate = 1e5 * cases / population)   # per 100,000
+pal <- colorQuantile("YlOrRd", by_county$rate, n = 5)              # quintiles
+# then, in addPolygons(): fillColor = ~pal(rate)
+```
+
+Point data (case or facility locations): `addCircleMarkers()` in place of
+`addPolygons()`, with a time series of counts per period.
+:::
+
+# Before you demonstrate M1
+
+1. **Session > Restart R**, then **Knit**: it renders from a clean start.
+2. The data are read with a relative path, `data/...`, never `C:/Users/...`.
+3. The map has a legend, and its title says what, where and when.
+4. The time series has a labelled axis, with units.
+5. A `>` note under a panel names the data source.
+
+# When it breaks
+
+| What you see | Likely cause | Fix |
+|---|---|---|
+| A scrolling page, not a dashboard | rendered with `quarto render`, or saved as `.qmd` | save as `.Rmd`, click **Knit** |
+| `object 'oh' not found` in a panel | data loaded below the first `Column` | setup chunk first, before any `Column` |
+| A grey map | the join failed: all SIRs are `NA` | `GEOID` as text; `sum(is.na(oh_map$SIR))` |
+| Warning: *not long-lat data* | no `st_transform(4326)` | add it after `counties()` |
+| `there is no package called 'flexdashboard'` | not installed | `install.packages(c("flexdashboard", "plotly", "DT"))` |
+| Squashed panels | too many panels in one column | fewer panels, or `vertical_layout: scroll` |
+| Knits, but not on GitHub Pages | `dashboard.html` not copied to `docs/` | check `resources:`, rerun `quarto render`, push |
+
+If Knit fails on your laptop, use a lab machine or
+[Posit Cloud](https://posit.cloud): renderable from your repository is
+enough for M1.
+
+# Next: M2 {.unnumbered}
+
+The same file. One line in the YAML header, `runtime: shiny`, and `focus`
+becomes a dropdown, the period a slider (Moraga Ch. 13--14).
+
+# References {.unnumbered}
+
+Aden-Buie, G., Sievert, C., Iannone, R., Allaire, J. J., & Borges, B. (2023).
+*flexdashboard: R Markdown format for flexible dashboards*.
+<https://pkgs.rstudio.com/flexdashboard/>
+
+Moraga, P. (2019). *Geospatial health data: Modeling and visualization with
+R-INLA and Shiny*. Chapman & Hall/CRC, Ch. 7 and 12.
